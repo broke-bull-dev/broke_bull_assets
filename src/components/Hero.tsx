@@ -90,7 +90,7 @@ export function Hero() {
 
               <Image
                 src="/LOGO_COIN_METADATA.png"
-                alt="Broke Bull"
+                alt="On Chain Drip"
                 fill
                 className="object-contain p-8 drop-shadow-2xl"
                 priority

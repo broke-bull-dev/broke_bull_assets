@@ -1,7 +1,7 @@
 import Image from 'next/image';
 
 export function Footer() {
-  const contactEmail = process.env.NEXT_PUBLIC_CONTACT_EMAIL || 'contact@brokebull.store';
+  const contactEmail = process.env.NEXT_PUBLIC_CONTACT_EMAIL || 'contact@onchaindip.store';
 
   return (
     <footer className="bg-dark-900 border-t border-dark-500 py-12">
@@ -18,8 +18,8 @@ export function Footer() {
               />
             </div>
             <div>
-              <span className="text-white font-bold">BROKE BULL</span>
-              <span className="text-gold-500 font-bold"> STORE</span>
+              <span className="text-white font-bold">ON CHAIN</span>
+              <span className="text-gold-500 font-bold"> DRIP</span>
             </div>
           </div>
 
@@ -37,7 +37,7 @@ export function Footer() {
           {/* Disclaimer */}
           <div className="text-xs text-gray-600 text-center md:text-right max-w-xs">
             <p>All NFT art is owned by the customer.</p>
-            <p className="mt-1">© {new Date().getFullYear()} Broke Bull Store</p>
+            <p className="mt-1">© {new Date().getFullYear()} On Chain Drip</p>
           </div>
         </div>
       </div>

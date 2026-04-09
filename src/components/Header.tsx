@@ -13,14 +13,14 @@ export function Header() {
             <div className="relative w-9 h-9">
               <Image
                 src="/LOGO_COIN_METADATA.png"
-                alt="Broke Bull"
+                alt="On Chain Drip"
                 fill
                 className="object-contain rounded-full"
               />
             </div>
             <div>
-              <span className="text-white font-bold text-lg tracking-tight">BROKE BULL</span>
-              <span className="text-gold-500 font-bold text-lg tracking-tight"> STORE</span>
+              <span className="text-white font-bold text-lg tracking-tight">ON CHAIN</span>
+              <span className="text-gold-500 font-bold text-lg tracking-tight"> DRIP</span>
             </div>
           </div>
 
