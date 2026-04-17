@@ -12,7 +12,7 @@ export function Footer() {
             <div className="relative w-8 h-8">
               <Image
                 src="/LOGO_COIN_METADATA.png"
-                alt="Broke Bull"
+                alt="On Chain Drip"
                 fill
                 className="object-contain rounded-full"
               />
