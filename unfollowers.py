@@ -1,60 +1,70 @@
 #!/usr/bin/env python3
 """
 Lista usuarios que seguís pero que no te siguen de vuelta.
-Usa las cookies de tu navegador (no requiere contraseña).
 
-Requisitos: pip install instaloader browser-cookie3
-Uso: python3 unfollowers.py <tu_usuario>
+Uso:
+  python3 unfollowers.py <usuario> <sessionid>
+
+El sessionid se obtiene desde Chrome:
+  F12 > Application > Cookies > www.instagram.com > sessionid
 """
 
 import sys
-import instaloader
-
-try:
-    import browser_cookie3
-except ImportError:
-    print("Falta instalar browser-cookie3: pip install browser-cookie3")
-    sys.exit(1)
+import time
+import requests
 
 
-def load_browser_cookies(session):
-    for loader, name in [
-        (browser_cookie3.chrome, "Chrome"),
-        (browser_cookie3.firefox, "Firefox"),
-        (browser_cookie3.safari, "Safari"),
-    ]:
-        try:
-            cookies = loader(domain_name=".instagram.com")
-            session.cookies.update(cookies)
-            if session.cookies.get("sessionid"):
-                print(f"Sesion cargada desde {name}.")
-                return True
-        except Exception:
-            continue
-    return False
+def get_user_id(session, username):
+    url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
+    headers = {
+        "X-IG-App-ID": "936619743392459",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": f"https://www.instagram.com/{username}/",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    }
+    resp = session.get(url, headers=headers)
+    resp.raise_for_status()
+    return resp.json()["data"]["user"]["id"]
 
 
-def get_unfollowers(username):
-    L = instaloader.Instaloader()
+def get_paginated(session, url):
+    results = []
+    next_max_id = None
+    headers = {
+        "X-IG-App-ID": "936619743392459",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    }
+    while True:
+        params = {"count": 100}
+        if next_max_id:
+            params["max_id"] = next_max_id
+        resp = session.get(url, headers=headers, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        results.extend(u["username"] for u in data.get("users", []))
+        next_max_id = data.get("next_max_id")
+        if not next_max_id:
+            break
+        time.sleep(1)
+    return set(results)
 
-    if not load_browser_cookies(L.context._session):
-        print("No se encontraron cookies de Instagram en ningun navegador.")
-        print("Asegurate de estar logueado en Instagram en Chrome, Firefox o Safari.")
-        sys.exit(1)
 
-    L.context.username = username
+def get_unfollowers(username, sessionid):
+    session = requests.Session()
+    session.cookies.set("sessionid", sessionid, domain=".instagram.com")
 
+    print("Obteniendo ID del perfil...")
     try:
-        profile = instaloader.Profile.from_username(L.context, username)
+        user_id = get_user_id(session, username)
     except Exception as e:
-        print(f"Error al cargar el perfil: {e}")
+        print(f"Error: no se pudo obtener el perfil. Verificá que el sessionid sea correcto.\nDetalle: {e}")
         sys.exit(1)
 
     print("Obteniendo seguidos...")
-    following = set(p.username for p in profile.get_followees())
+    following = get_paginated(session, f"https://i.instagram.com/api/v1/friendships/{user_id}/following/")
 
     print("Obteniendo seguidores...")
-    followers = set(p.username for p in profile.get_followers())
+    followers = get_paginated(session, f"https://i.instagram.com/api/v1/friendships/{user_id}/followers/")
 
     unfollowers = following - followers
 
@@ -72,7 +82,13 @@ def get_unfollowers(username):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(f"Uso: python3 {sys.argv[0]} <tu_usuario_de_instagram>")
+    if len(sys.argv) != 3:
+        print(f"Uso: python3 {sys.argv[0]} <usuario> <sessionid>")
+        print()
+        print("Para obtener el sessionid:")
+        print("  1. Abre Instagram en Chrome")
+        print("  2. Presiona F12 > Application > Cookies > www.instagram.com")
+        print("  3. Copia el valor de 'sessionid'")
         sys.exit(1)
-    get_unfollowers(sys.argv[1])
+
+    get_unfollowers(sys.argv[1], sys.argv[2])
