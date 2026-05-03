@@ -12,17 +12,19 @@ function igHeaders(sessionid: string) {
     'X-Requested-With': 'XMLHttpRequest',
     Cookie: `sessionid=${sessionid}`,
     'User-Agent': UA,
+    Referer: 'https://www.instagram.com/',
+    Origin: 'https://www.instagram.com',
   };
 }
 
-async function getUserId(sessionid: string, username: string): Promise<string> {
-  const res = await fetch(
-    `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
-    { headers: igHeaders(sessionid) }
-  );
-  if (!res.ok) throw new Error(`Perfil no encontrado o sessionid inválido (${res.status})`);
-  const data = await res.json();
-  return data.data.user.id as string;
+// The user ID is the first segment of the decoded sessionid: "{userId}:{...}"
+function extractUserId(sessionid: string): string {
+  const decoded = decodeURIComponent(sessionid);
+  const userId = decoded.split(':')[0];
+  if (!userId || !/^\d+$/.test(userId)) {
+    throw new Error('sessionid inválido — no se pudo extraer el user ID');
+  }
+  return userId;
 }
 
 async function fetchList(
@@ -43,8 +45,8 @@ async function fetchList(
     for (const u of data.users ?? []) {
       results.push({
         username: u.username,
-        full_name: u.full_name,
-        profile_pic_url: u.profile_pic_url,
+        full_name: u.full_name ?? '',
+        profile_pic_url: u.profile_pic_url ?? '',
       });
     }
 
@@ -64,7 +66,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const userId = await getUserId(sessionid, username);
+    const userId = extractUserId(sessionid);
 
     const following = await fetchList(
       sessionid,
