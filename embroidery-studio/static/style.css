@@ -50,6 +50,10 @@ input[type=number] {
 .toggles { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; }
 .toggles label { flex-direction: row; align-items: center; gap: 6px;
   color: var(--text); font-size: 14px; }
+.modebox { flex-direction: row; align-items: flex-start; gap: 8px; margin-top: 14px;
+  background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; color: var(--text); font-size: 13px; }
+.modebox input { margin-top: 2px; }
 button#go {
   margin-top: 18px; width: 100%; padding: 13px; font-size: 16px; font-weight: 600;
   background: var(--accent); color: #1a1300; border: none; border-radius: 10px;

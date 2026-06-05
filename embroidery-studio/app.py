@@ -71,6 +71,7 @@ def api_digitize():
         remove_background=_b("remove_background", True),
         outline=_b("outline", True),
         underlay=_b("underlay", True),
+        photo_mode=_b("photo_mode", False),
     )
 
     try:

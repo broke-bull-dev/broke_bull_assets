@@ -35,6 +35,7 @@ class Options:
     pull_comp_mm: float = 0.20       # compensación de tracción (evita huecos)
     min_area_mm2: float = 1.5        # descarta manchitas más chicas que esto
     work_px: int = 900               # resolución de trabajo (lado mayor)
+    photo_mode: bool = False         # modo foto: para imágenes realistas
 
 
 @dataclass
@@ -88,6 +89,28 @@ def _quantize(rgb, n_colors):
     labels = np.array(q)
     pal = q.getpalette()[: n_colors * 3]
     palette = [tuple(pal[i:i + 3]) for i in range(0, len(pal), 3)]
+    return labels, palette
+
+
+def _quantize_kmeans(rgb, n_colors):
+    """Cuantización perceptual con k-means en espacio CIE-Lab.
+
+    Da colores más naturales en fotos/degradados que la cuantización común."""
+    from scipy.cluster.vq import kmeans2, vq
+    from skimage import color as skcolor
+
+    H, W = rgb.shape[:2]
+    lab = skcolor.rgb2lab(rgb.astype(np.float64) / 255.0).reshape(-1, 3)
+    # muestrea para acelerar el cálculo de centroides
+    rng = np.random.default_rng(0)
+    m = min(30000, lab.shape[0])
+    sample = lab[rng.choice(lab.shape[0], m, replace=False)]
+    cent, _ = kmeans2(sample, n_colors, minit="++", seed=0)
+    # asigna todos los pixeles al centroide más cercano (vq en C, eficiente)
+    codes, _ = vq(lab, cent)
+    labels = codes.reshape(H, W).astype(np.int32)
+    pal_rgb = skcolor.lab2rgb(cent.reshape(-1, 1, 3)).reshape(-1, 3)
+    palette = [tuple(int(round(v * 255)) for v in c) for c in pal_rgb]
     return labels, palette
 
 
@@ -181,11 +204,15 @@ def digitize(data, opts: Options) -> Result:
     height_mm = H * mm_per_px
 
     n = max(2, min(16, opts.max_colors + (1 if opts.remove_background else 0)))
-    labels, palette = _quantize(rgb, n)
+    if opts.photo_mode:
+        labels, palette = _quantize_kmeans(rgb, n)
+    else:
+        labels, palette = _quantize(rgb, n)
     bg_mask = _detect_background(labels, alpha, palette, opts)
 
     warnings = []
-    min_area_px = opts.min_area_mm2 / (mm_per_px ** 2)
+    # en modo foto se descartan manchitas más grandes (menos ruido/saltos)
+    min_area_px = opts.min_area_mm2 * (2.5 if opts.photo_mode else 1.0) / (mm_per_px ** 2)
 
     # aviso si la imagen es foto-realista (degradados/detalle): el bordado
     # automático sólo la puede aproximar.
@@ -251,27 +278,34 @@ def digitize(data, opts: Options) -> Result:
             "catalog_number": thread["code"],
         })
 
+        # modo foto: cada color va a un ángulo distinto -> los tonos se mezclan
+        # ópticamente y se evita el bandeado uniforme.
+        if opts.photo_mode:
+            layer_angle = (opts.fill_angle_deg + (order - 1) * 23.0) % 180.0
+        else:
+            layer_angle = opts.fill_angle_deg
+
         pts = []
         # se rellena cada componente conectado por separado (corte de hilo
         # entre blobs => sin puntadas largas cruzando zonas vacías)
         comp_lbl, ncomp = ndimage.label(mask)
         for ci in range(1, ncomp + 1):
             cmask = (comp_lbl == ci)
-            # underlay: relleno escaso perpendicular para fijar la tela
-            if opts.underlay:
+            # underlay: relleno escaso (se omite en modo foto para no engrosar)
+            if opts.underlay and not opts.photo_mode:
                 pts += fill_mask(cmask, mm_per_px,
                                  row_spacing_mm=max(2.0, opts.row_spacing_mm * 6),
                                  stitch_len_mm=opts.stitch_len_mm * 1.5,
-                                 angle_deg=opts.fill_angle_deg + 90,
+                                 angle_deg=layer_angle + 90,
                                  travel_threshold_mm=travel_threshold_mm)
             # relleno principal
             pts += fill_mask(cmask, mm_per_px,
                              row_spacing_mm=opts.row_spacing_mm,
                              stitch_len_mm=opts.stitch_len_mm,
-                             angle_deg=opts.fill_angle_deg,
+                             angle_deg=layer_angle,
                              travel_threshold_mm=travel_threshold_mm)
-        # contorno para definir filos (omite tramos chicos para no "esbozar")
-        if opts.outline:
+        # contorno para definir filos (omite tramos chicos; nunca en modo foto)
+        if opts.outline and not opts.photo_mode:
             pts += outline_mask(mask, mm_per_px, stitch_len_mm=opts.stitch_len_mm,
                                 min_len_mm=min_outline_len_mm)
 

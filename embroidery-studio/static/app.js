@@ -32,7 +32,7 @@ $("go").addEventListener("click", async () => {
   fd.append("image", file);
   ["width_mm", "max_colors", "row_spacing_mm", "stitch_len_mm", "fill_angle_deg"]
     .forEach((k) => fd.append(k, $(k).value));
-  ["remove_background", "outline", "underlay"]
+  ["remove_background", "outline", "underlay", "photo_mode"]
     .forEach((k) => fd.append(k, $(k).checked ? "1" : "0"));
 
   $("go").disabled = true;
