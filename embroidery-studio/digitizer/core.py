@@ -40,9 +40,10 @@ class Options:
 @dataclass
 class ColorLayer:
     order: int
-    code: str
-    name: str
-    rgb: tuple
+    rgb: tuple              # color REAL de la imagen (lo que se borda / preview)
+    thread_code: str        # hilo Madeira más parecido (para comprar/cargar)
+    thread_name: str
+    thread_rgb: tuple
     stitches: int = 0
 
 
@@ -91,24 +92,45 @@ def _quantize(rgb, n_colors):
 
 
 def _detect_background(labels, alpha, palette, opts):
-    """Marca pixeles de fondo (no se bordan). Combina transparencia + color de borde."""
+    """Marca pixeles de fondo (no se bordan).
+
+    Clave: sólo se quita el fondo CONECTADO AL BORDE de la imagen (flood-fill),
+    así no se comen blancos/colores interiores (camiseta, bandera, etc.).
+    """
     H, W = labels.shape
     bg_mask = np.zeros((H, W), dtype=bool)
     if not opts.remove_background:
         return bg_mask
-    # 1) transparencia
-    if alpha is not None:
-        bg_mask |= (alpha < 128)
-    # 2) color dominante en el borde de la imagen
-    border = np.concatenate([
-        labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]
-    ])
+
+    # 1) transparencia (también sólo la conectada al borde)
+    transp = (alpha < 128) if alpha is not None else np.zeros((H, W), bool)
+
+    # 2) color(es) dominantes del borde
+    border = np.concatenate([labels[0, :], labels[-1, :],
+                             labels[:, 0], labels[:, -1]])
+    bg_labels = set()
     if len(border):
         vals, counts = np.unique(border, return_counts=True)
-        bg_label = int(vals[np.argmax(counts)])
-        # sólo lo tratamos como fondo si domina claramente el borde
-        if counts.max() / counts.sum() > 0.5:
-            bg_mask |= (labels == bg_label)
+        order = np.argsort(-counts)
+        total = counts.sum()
+        acc = 0
+        for j in order:
+            frac = counts[j] / total
+            if frac < 0.08 and acc > 0.5:
+                break
+            bg_labels.add(int(vals[j]))
+            acc += frac
+
+    candidate = transp.copy()
+    for bl in bg_labels:
+        candidate |= (labels == bl)
+
+    # 3) quedarse SÓLO con lo conectado al borde
+    lbl, num = ndimage.label(candidate)
+    if num:
+        border_ids = set(lbl[0, :]) | set(lbl[-1, :]) | set(lbl[:, 0]) | set(lbl[:, -1])
+        border_ids.discard(0)
+        bg_mask = np.isin(lbl, list(border_ids))
     return bg_mask
 
 
@@ -162,62 +184,70 @@ def digitize(data, opts: Options) -> Result:
     labels, palette = _quantize(rgb, n)
     bg_mask = _detect_background(labels, alpha, palette, opts)
 
-    # mapear cada color de la paleta cuantizada al hilo más parecido
-    thread_idx = nearest_thread_indices(np.array(palette))  # (n,)
-
     warnings = []
     min_area_px = opts.min_area_mm2 / (mm_per_px ** 2)
 
-    # agrupa los labels que caen en el mismo hilo
-    used = {}  # thread_index -> mask
+    # aviso si la imagen es foto-realista (degradados/detalle): el bordado
+    # automático sólo la puede aproximar.
+    n_unique = len(np.unique(rgb.reshape(-1, 3), axis=0))
+    if n_unique > 2000:
+        warnings.append(
+            "Esta imagen es foto-realista (muchos degradados y detalle). El "
+            "bordado automático sólo la puede APROXIMAR: subí los colores a "
+            "10-14 y, para máxima fidelidad, hace falta digitalización manual.")
+
+    # una capa por color REAL de la imagen (no se fuerza a la paleta de hilos)
+    layers_data = []   # (real_rgb, mask, area)
     for lab in range(len(palette)):
         m = (labels == lab) & (~bg_mask)
         if not m.any():
             continue
-        ti = int(thread_idx[lab])
-        used.setdefault(ti, np.zeros((H, W), dtype=bool))
-        used[ti] |= m
-
-    # limpia cada máscara y ordena por área descendente
-    layers_data = []
-    for ti, mask in used.items():
-        mask = _clean_mask(mask, mm_per_px, min_area_px)
+        mask = _clean_mask(m, mm_per_px, min_area_px)
         area = int(mask.sum())
         if area == 0:
             continue
-        layers_data.append((ti, mask, area))
+        layers_data.append((tuple(int(c) for c in palette[lab]), mask, area))
 
     layers_data.sort(key=lambda x: -x[2])
 
-    # compensación de tracción: el color de arriba (orden posterior) se dilata un
-    # poquito para que no aparezcan huecos de tela entre regiones contiguas.
+    # compensación de tracción: cada región se dilata un poquito para que no
+    # aparezcan huecos de tela entre colores contiguos.
     pull_px = max(0, int(round(opts.pull_comp_mm / mm_per_px)))
     if pull_px > 0:
         struct = _disk(pull_px)
-        layers_data = [(ti, ndimage.binary_dilation(m, structure=struct), a)
-                       for (ti, m, a) in layers_data]
+        layers_data = [(c, ndimage.binary_dilation(m, structure=struct), a)
+                       for (c, m, a) in layers_data]
 
     # respeta el límite de agujas
     if len(layers_data) > opts.max_colors:
         warnings.append(
-            f"La imagen necesitaba {len(layers_data)} colores; se recortó a "
-            f"{opts.max_colors} (las {opts.max_colors} áreas más grandes).")
+            f"La imagen tenía {len(layers_data)} colores; se usaron los "
+            f"{opts.max_colors} de mayor área. Subí 'Colores' para conservar más.")
         layers_data = layers_data[: opts.max_colors]
     if len(layers_data) > 15:
         layers_data = layers_data[:15]
         warnings.append("Tu máquina tiene 15 agujas: máximo 15 colores por bordado.")
 
+    # hilo Madeira más parecido a cada color real (sólo lista de compra)
+    if layers_data:
+        thread_idx = nearest_thread_indices(np.array([c for c, _, _ in layers_data]))
+    else:
+        thread_idx = []
+
     # ---- construir el patrón ----
     pattern = pe.EmbPattern()
     travel_threshold_mm = max(4.0, opts.stitch_len_mm * 2.5)
+    min_outline_len_mm = max(6.0, opts.stitch_len_mm * 4)
     layers = []
     total_stitches = 0
 
-    for order, (ti, mask, area) in enumerate(layers_data, start=1):
-        thread = THREADS[ti]
+    for order, (real_rgb, mask, area) in enumerate(layers_data, start=1):
+        thread = THREADS[int(thread_idx[order - 1])]
+        # se borda con el COLOR REAL de la imagen; el nombre lleva la
+        # sugerencia Madeira para que el software/operador la vea.
         pattern.add_thread({
-            "rgb": (thread["rgb"][0] << 16) | (thread["rgb"][1] << 8) | thread["rgb"][2],
-            "name": thread["name"],
+            "rgb": (real_rgb[0] << 16) | (real_rgb[1] << 8) | real_rgb[2],
+            "name": f"{thread['name']} (~Madeira {thread['code']})",
             "catalog_number": thread["code"],
         })
 
@@ -240,15 +270,16 @@ def digitize(data, opts: Options) -> Result:
                              stitch_len_mm=opts.stitch_len_mm,
                              angle_deg=opts.fill_angle_deg,
                              travel_threshold_mm=travel_threshold_mm)
-        # contorno para definir filos (maneja todos los componentes internamente)
+        # contorno para definir filos (omite tramos chicos para no "esbozar")
         if opts.outline:
-            pts += outline_mask(mask, mm_per_px, stitch_len_mm=opts.stitch_len_mm)
+            pts += outline_mask(mask, mm_per_px, stitch_len_mm=opts.stitch_len_mm,
+                                min_len_mm=min_outline_len_mm)
 
         count = _emit_layer(pattern, pts, height_mm)
         total_stitches += count
 
-        layers.append(ColorLayer(order, thread["code"], thread["name"],
-                                  thread["rgb"], count))
+        layers.append(ColorLayer(order, real_rgb, thread["code"],
+                                  thread["name"], thread["rgb"], count))
 
         # cambio de color entre capas (no después de la última)
         if order < len(layers_data):
@@ -346,12 +377,14 @@ def _sequence_text(layers, opts, total, height_mm):
     lines.append(f"Puntadas: {total}")
     lines.append("")
     lines.append("Orden de bordado (asigná cada color a una aguja):")
-    lines.append("-" * 40)
+    lines.append("color real de la imagen  ->  hilo Madeira sugerido")
+    lines.append("-" * 56)
     for L in layers:
         hexc = "#%02X%02X%02X" % L.rgb
-        lines.append(f"  {L.order:>2}. Madeira {L.code:<6} {L.name:<18} "
-                     f"{hexc}  ({L.stitches} pts)")
+        lines.append(f"  {L.order:>2}. {hexc}  ->  Madeira {L.thread_code:<6} "
+                     f"{L.thread_name:<18} ({L.stitches} pts)")
     lines.append("")
-    lines.append("La máquina hace STOP entre colores: cambiá/confirmá la aguja")
-    lines.append("según este orden.")
+    lines.append("El color que se borda es el REAL de tu imagen; el Madeira es")
+    lines.append("la sugerencia de cono más parecido para comprar/cargar.")
+    lines.append("La máquina hace STOP entre colores: cambiá/confirmá la aguja.")
     return "\n".join(lines)

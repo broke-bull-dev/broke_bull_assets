@@ -76,9 +76,10 @@ function render(d) {
   d.layers.forEach((L) => {
     const li = document.createElement("li");
     li.innerHTML = `
-      <span class="swatch" style="background:${L.hex}"></span>
-      <span><span class="cname">${L.order}. ${L.name}</span>
-        <br><small style="color:var(--muted)">Madeira ${L.code} · ${L.hex}</small></span>
+      <span class="swatch" style="background:${L.hex}" title="color real ${L.hex}"></span>
+      <span><span class="cname">${L.order}. ${L.hex}</span>
+        <br><small style="color:var(--muted)">hilo sugerido: Madeira ${L.code} · ${L.name}</small></span>
+      <span class="swatch sm" style="background:${L.thread_hex}" title="Madeira ${L.code}"></span>
       <span class="cmeta">${L.stitches.toLocaleString()} pts</span>`;
     list.appendChild(li);
   });

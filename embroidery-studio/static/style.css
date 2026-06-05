@@ -81,6 +81,7 @@ button#go:disabled { opacity: .45; cursor: not-allowed; }
   border-bottom: 1px solid var(--line); }
 .swatch { width: 24px; height: 24px; border-radius: 6px; flex: 0 0 auto;
   border: 1px solid #0006; }
+.swatch.sm { width: 16px; height: 16px; opacity: .85; }
 .colorList .cname { font-weight: 600; }
 .colorList .cmeta { color: var(--muted); font-size: 12.5px; margin-left: auto; }
 footer { text-align: center; color: var(--muted); font-size: 12.5px;

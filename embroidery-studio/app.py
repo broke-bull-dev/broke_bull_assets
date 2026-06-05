@@ -64,7 +64,7 @@ def api_digitize():
 
     opts = Options(
         width_mm=max(10.0, min(400.0, _f("width_mm", 100))),
-        max_colors=max(1, min(15, _i("max_colors", 6))),
+        max_colors=max(1, min(15, _i("max_colors", 8))),
         row_spacing_mm=max(0.25, min(1.5, _f("row_spacing_mm", 0.40))),
         stitch_len_mm=max(1.0, min(7.0, _f("stitch_len_mm", 2.2))),
         fill_angle_deg=_f("fill_angle_deg", 0),
@@ -97,8 +97,11 @@ def api_digitize():
         "stitch_count": res.stitch_count,
         "preview": "data:image/png;base64," + base64.b64encode(res.preview_png).decode(),
         "layers": [
-            {"order": L.order, "code": L.code, "name": L.name,
-             "hex": "#%02X%02X%02X" % L.rgb, "stitches": L.stitches}
+            {"order": L.order,
+             "hex": "#%02X%02X%02X" % L.rgb,                 # color real bordado
+             "code": L.thread_code, "name": L.thread_name,   # sugerencia Madeira
+             "thread_hex": "#%02X%02X%02X" % L.thread_rgb,
+             "stitches": L.stitches}
             for L in res.layers
         ],
         "warnings": res.warnings,

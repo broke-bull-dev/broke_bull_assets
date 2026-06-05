@@ -111,16 +111,22 @@ def fill_mask(mask, mm_per_px, row_spacing_mm, stitch_len_mm,
     return points
 
 
-def outline_mask(mask, mm_per_px, stitch_len_mm, simplify_px=1.2):
+def outline_mask(mask, mm_per_px, stitch_len_mm, simplify_px=1.2, min_len_mm=6.0):
     """Genera puntada corrida siguiendo los contornos de la máscara.
 
-    Mejora muchísimo el filo/definición de logos. Devuelve (x,y,travel)."""
+    Mejora el filo/definición. Omite contornos cortos (manchitas) para no
+    "esbozar" suciedad en imágenes con mucho detalle. Devuelve (x,y,travel)."""
     padded = np.pad(mask.astype(float), 1, mode="constant")
     contours = measure.find_contours(padded, 0.5)
     stitch_step = max(1.0, stitch_len_mm / mm_per_px)
+    min_len_px = min_len_mm / mm_per_px
     points = []
     for contour in contours:
         if len(contour) < 4:
+            continue
+        # longitud total del contorno; descarta los muy chicos
+        clen = np.sum(np.sqrt(np.sum(np.diff(contour, axis=0) ** 2, axis=1)))
+        if clen < min_len_px:
             continue
         simp = measure.approximate_polygon(contour, tolerance=simplify_px)
         if len(simp) < 2:
