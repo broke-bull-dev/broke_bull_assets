@@ -32,8 +32,9 @@ class Options:
     remove_background: bool = True   # quitar el fondo (no bordarlo)
     outline: bool = True             # contorno para definir filos
     underlay: bool = True            # base/underlay para estabilidad
-    min_area_mm2: float = 1.0        # descarta manchitas más chicas que esto
-    work_px: int = 600               # resolución de trabajo (lado mayor)
+    pull_comp_mm: float = 0.20       # compensación de tracción (evita huecos)
+    min_area_mm2: float = 1.5        # descarta manchitas más chicas que esto
+    work_px: int = 900               # resolución de trabajo (lado mayor)
 
 
 @dataclass
@@ -65,15 +66,17 @@ def _load_image(data, opts):
     # redimensiona manteniendo proporción al lado mayor work_px
     w, h = img.size
     scale = opts.work_px / max(w, h)
-    if scale < 1.0:
+    if scale != 1.0:
         img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))),
                          Image.LANCZOS)
     alpha = np.array(img.split()[-1])
     # compone sobre blanco para tener color sólido
     bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-    rgb = np.array(Image.alpha_composite(bg, img).convert("RGB"))
-    # suaviza ruido de compresión (jpg) sin perder los bordes de un logo
-    rgb_img = Image.fromarray(rgb).filter(ImageFilter.MedianFilter(3))
+    rgb_img = Image.alpha_composite(bg, img).convert("RGB")
+    # aplana el ruido de compresión / anti-aliasing manteniendo los bordes:
+    # ModeFilter unifica cada zona a su color dominante (ideal para colores planos)
+    rgb_img = rgb_img.filter(ImageFilter.MedianFilter(3))
+    rgb_img = rgb_img.filter(ImageFilter.ModeFilter(5))
     return np.array(rgb_img), alpha
 
 
@@ -109,6 +112,46 @@ def _detect_background(labels, alpha, palette, opts):
     return bg_mask
 
 
+def _disk(r):
+    r = max(1, int(r))
+    y, x = np.ogrid[-r:r + 1, -r:r + 1]
+    return (x * x + y * y) <= r * r
+
+
+def _clean_mask(mask, mm_per_px, min_area_px):
+    """Limpia una máscara de color para que la forma quede prolija:
+    - tapa agujeros chicos (poros), pero respeta huecos reales (letras, anillos)
+    - suaviza el borde escalonado
+    - descarta manchitas sueltas
+    """
+    if not mask.any():
+        return mask
+
+    # 1) tapar SÓLO agujeros chicos (no los huecos grandes intencionales)
+    filled = ndimage.binary_fill_holes(mask)
+    holes = filled & ~mask
+    if holes.any():
+        hlbl, hn = ndimage.label(holes)
+        if hn:
+            hsizes = ndimage.sum(np.ones_like(hlbl), hlbl, index=range(1, hn + 1))
+            small_hole = (1.2 / mm_per_px) ** 2          # < ~1.2mm de lado
+            for i, s in enumerate(hsizes, start=1):
+                if s < small_hole:
+                    mask = mask | (hlbl == i)
+
+    # 2) suavizar el borde escalonado (sin destruir trazos finos)
+    k = max(3, int(round(0.35 / mm_per_px)) | 1)
+    mask = ndimage.median_filter(mask, size=k)
+
+    # 3) descartar componentes muy chicos
+    lbl, num = ndimage.label(mask)
+    if num:
+        sizes = ndimage.sum(np.ones_like(lbl), lbl, index=range(1, num + 1))
+        keep_ids = [i for i, s in enumerate(sizes, start=1) if s >= min_area_px]
+        mask = np.isin(lbl, keep_ids) if keep_ids else np.zeros_like(mask)
+    return mask
+
+
 def digitize(data, opts: Options) -> Result:
     rgb, alpha = _load_image(data, opts)
     H, W = rgb.shape[:2]
@@ -135,25 +178,24 @@ def digitize(data, opts: Options) -> Result:
         used.setdefault(ti, np.zeros((H, W), dtype=bool))
         used[ti] |= m
 
-    # limpia manchitas y ordena por área descendente
+    # limpia cada máscara y ordena por área descendente
     layers_data = []
     for ti, mask in used.items():
-        mask = ndimage.binary_opening(mask, iterations=1)
-        # elimina componentes muy chicos
-        lbl, num = ndimage.label(mask)
-        if num:
-            sizes = ndimage.sum(np.ones_like(lbl), lbl, index=range(1, num + 1))
-            keep = np.zeros_like(mask)
-            for i, s in enumerate(sizes, start=1):
-                if s >= min_area_px:
-                    keep |= (lbl == i)
-            mask = keep
+        mask = _clean_mask(mask, mm_per_px, min_area_px)
         area = int(mask.sum())
         if area == 0:
             continue
         layers_data.append((ti, mask, area))
 
     layers_data.sort(key=lambda x: -x[2])
+
+    # compensación de tracción: el color de arriba (orden posterior) se dilata un
+    # poquito para que no aparezcan huecos de tela entre regiones contiguas.
+    pull_px = max(0, int(round(opts.pull_comp_mm / mm_per_px)))
+    if pull_px > 0:
+        struct = _disk(pull_px)
+        layers_data = [(ti, ndimage.binary_dilation(m, structure=struct), a)
+                       for (ti, m, a) in layers_data]
 
     # respeta el límite de agujas
     if len(layers_data) > opts.max_colors:
@@ -258,29 +300,34 @@ def _emit_layer(pattern, pts, height_mm):
     return count
 
 
-def _render_preview(pattern, layers, width_mm, height_mm, scale=4):
-    """Dibuja el resultado de las puntadas para previsualizar."""
+def _render_preview(pattern, layers, width_mm, height_mm, scale=5):
+    """Dibuja el resultado de las puntadas para previsualizar, con grosor de
+    hilo para que la cobertura se vea como en la tela real."""
     W = max(1, int(width_mm * scale))
     H = max(1, int(height_mm * scale))
-    img = Image.new("RGB", (W + 20, H + 20), (245, 245, 245))
+    # render a 2x y luego reduce -> antialiasing (bordes más suaves)
+    ss = 2
+    img = Image.new("RGB", ((W + 24) * ss, (H + 24) * ss), (247, 247, 247))
     draw = ImageDraw.Draw(img)
+    thread_w = max(2, int(round(0.45 * scale * ss)))  # grosor ~0.45mm
 
-    # color por bloque (en el mismo orden que las capas)
     blocks = pattern.get_as_colorblocks()
     layer_list = list(layers)
     for li, (stitches, thread) in enumerate(blocks):
         col = layer_list[li].rgb if li < len(layer_list) else (40, 40, 40)
         prev = None
         for (x, y, cmd) in stitches:
-            px = x / 10.0 * scale + 10
+            px = (x / 10.0 * scale + 12) * ss
             # deshace el flip vertical del bordado para mostrarlo como la foto
-            py = (height_mm - y / 10.0) * scale + 10
+            py = ((height_mm - y / 10.0) * scale + 12) * ss
             if cmd == pe.STITCH:
                 if prev is not None:
-                    draw.line([prev, (px, py)], fill=col, width=1)
+                    draw.line([prev, (px, py)], fill=col, width=thread_w,
+                              joint="curve")
                 prev = (px, py)
             else:
                 prev = None
+    img = img.resize(((W + 24), (H + 24)), Image.LANCZOS)
     return _png_bytes(img)
 
 
