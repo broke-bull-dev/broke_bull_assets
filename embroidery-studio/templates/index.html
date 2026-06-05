@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embroidery Studio · Logo → .DST</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>🧵 Embroidery Studio</h1>
+    <p>Convertí un logo en un archivo <strong>.DST</strong> para tu Bai de 15 agujas.
+       Detecta los colores y los mapea a {{ thread_count }} hilos Madeira.</p>
+  </header>
+
+  <main>
+    <section class="panel controls">
+      <h2>1 · Imagen</h2>
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="image/*" hidden>
+        <span id="dropText">Arrastrá o hacé clic para subir un logo (PNG/JPG)</span>
+        <img id="srcPreview" alt="">
+      </label>
+
+      <h2>2 · Opciones</h2>
+      <div class="grid">
+        <label>Ancho del bordado (mm)
+          <input type="number" id="width_mm" value="100" min="10" max="400" step="5">
+        </label>
+        <label>Colores (máx. 15 agujas)
+          <input type="number" id="max_colors" value="6" min="1" max="15" step="1">
+        </label>
+        <label>Densidad — separación (mm)
+          <input type="number" id="row_spacing_mm" value="0.40" min="0.25" max="1.5" step="0.05">
+        </label>
+        <label>Largo de puntada (mm)
+          <input type="number" id="stitch_len_mm" value="2.2" min="1.0" max="7.0" step="0.1">
+        </label>
+        <label>Ángulo de relleno (°)
+          <input type="number" id="fill_angle_deg" value="0" min="0" max="180" step="15">
+        </label>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="remove_background" checked> Quitar fondo</label>
+        <label><input type="checkbox" id="outline" checked> Contorno (filos)</label>
+        <label><input type="checkbox" id="underlay" checked> Underlay (base)</label>
+      </div>
+
+      <button id="go" disabled>Generar .DST</button>
+      <p class="hint">Funciona mejor con logos / colores planos. Las fotos con
+         degradados quedan aproximadas.</p>
+    </section>
+
+    <section class="panel result">
+      <h2>3 · Resultado</h2>
+      <div id="status" class="status">Subí una imagen para empezar.</div>
+      <div id="output" hidden>
+        <div class="previewWrap">
+          <img id="resultPreview" alt="Vista previa del bordado">
+        </div>
+        <div class="meta">
+          <span id="dims"></span> · <span id="stitches"></span>
+        </div>
+        <div class="downloads">
+          <a id="dlDst" class="btn primary" href="#">⬇ Descargar .DST</a>
+          <a id="dlTxt" class="btn" href="#">⬇ Secuencia de colores (.txt)</a>
+        </div>
+        <ul id="warnings" class="warnings"></ul>
+        <h3>Secuencia de colores / agujas</h3>
+        <ol id="colorList" class="colorList"></ol>
+      </div>
+    </section>
+  </main>
+
+  <footer>Embroidery Studio · genera DST Tajima · paleta editable en
+    <code>digitizer/palette.py</code></footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
