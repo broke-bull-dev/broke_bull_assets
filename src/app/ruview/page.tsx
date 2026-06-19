@@ -8,6 +8,8 @@ import PresenceCard from '@/components/ruview/PresenceCard';
 import VitalSignsCard from '@/components/ruview/VitalSignsCard';
 import SignalCard from '@/components/ruview/SignalCard';
 import PoseViewer from '@/components/ruview/PoseViewer';
+import HumanFigure from '@/components/ruview/HumanFigure';
+import RoomView from '@/components/ruview/RoomView';
 
 export default function RuViewDashboard() {
   const { status, frame, isSimulated, connect, disconnect } = useRuView();
@@ -89,6 +91,27 @@ export default function RuViewDashboard() {
               <PresenceCard frame={frame} />
               <VitalSignsCard vitals={frame.vitalSigns} />
               <SignalCard frame={frame} />
+            </div>
+
+            {/* Room view + human figures */}
+            <RoomView frame={frame} />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {frame.persons.map((person, i) => (
+                <HumanFigure
+                  key={person.id}
+                  person={person}
+                  vitals={frame.vitalSigns}
+                  color={['#3b82f6', '#f59e0b', '#10b981', '#ef4444'][i % 4]}
+                  index={i}
+                />
+              ))}
+              {frame.personCount === 0 && (
+                <div className="col-span-full flex flex-col items-center justify-center py-12 text-center text-gray-500">
+                  <span className="text-4xl mb-2">🏠</span>
+                  <p className="text-sm">Sin personas detectadas en el cuarto</p>
+                </div>
+              )}
             </div>
 
             <PoseViewer persons={frame.persons} />
